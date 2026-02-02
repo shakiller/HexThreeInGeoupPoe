@@ -344,6 +344,7 @@
                 this.isAnimating = false;
                 this.vsBot = false; // Режим игры с ботом
                 this.playerTurn = true; // Чей ход (true = игрок, false = бот)
+                this.gradientCache = {}; // Кэш для градиентов
 
                 this.init();
             }
@@ -395,6 +396,77 @@
                 return { x, y };
             }
 
+            getGradientId(color) {
+                // Создаем уникальный ID для градиента на основе цвета
+                return `grad-${color.replace('#', '')}`;
+            }
+
+            createGradient(color) {
+                const gradientId = this.getGradientId(color);
+                
+                // Проверяем, существует ли уже такой градиент
+                if (this.gradientCache[gradientId]) {
+                    return gradientId;
+                }
+
+                // Создаем defs если его еще нет
+                let defs = this.canvas.querySelector('defs');
+                if (!defs) {
+                    defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    this.canvas.appendChild(defs);
+                }
+
+                // Функция для затемнения цвета
+                const darkenColor = (hex, percent) => {
+                    const num = parseInt(hex.replace('#', ''), 16);
+                    const r = Math.max(0, Math.floor((num >> 16) * (1 - percent)));
+                    const g = Math.max(0, Math.floor(((num >> 8) & 0x00FF) * (1 - percent)));
+                    const b = Math.max(0, Math.floor((num & 0x0000FF) * (1 - percent)));
+                    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+                };
+
+                // Функция для осветления цвета
+                const lightenColor = (hex, percent) => {
+                    const num = parseInt(hex.replace('#', ''), 16);
+                    const r = Math.min(255, Math.floor((num >> 16) + (255 - (num >> 16)) * percent));
+                    const g = Math.min(255, Math.floor(((num >> 8) & 0x00FF) + (255 - ((num >> 8) & 0x00FF)) * percent));
+                    const b = Math.min(255, Math.floor((num & 0x0000FF) + (255 - (num & 0x0000FF)) * percent));
+                    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+                };
+
+                // Создаем радиальный градиент для затемнения по краям
+                const radialGradient = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
+                radialGradient.setAttribute('id', gradientId);
+                radialGradient.setAttribute('cx', '50%');
+                radialGradient.setAttribute('cy', '50%');
+                radialGradient.setAttribute('r', '70%');
+
+                // Центр - слегка осветленный цвет
+                const lightColor = lightenColor(color, 0.15);
+                const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+                stop1.setAttribute('offset', '0%');
+                stop1.setAttribute('stop-color', lightColor);
+                radialGradient.appendChild(stop1);
+
+                // Средняя часть - основной цвет
+                const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+                stop2.setAttribute('offset', '50%');
+                stop2.setAttribute('stop-color', color);
+                radialGradient.appendChild(stop2);
+
+                // Края - затемненный цвет для эффекта объема
+                const darkColor = darkenColor(color, 0.4);
+                const stop3 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+                stop3.setAttribute('offset', '100%');
+                stop3.setAttribute('stop-color', darkColor);
+                radialGradient.appendChild(stop3);
+
+                defs.appendChild(radialGradient);
+                this.gradientCache[gradientId] = true;
+
+                return gradientId;
+            }
+
             drawHexagon(x, y, color, selected = false, oldY = null) {
                 const points = [];
                 for (let i = 0; i < 6; i++) {
@@ -405,9 +477,12 @@
                     points.push(`${px},${py}`);
                 }
 
+                // Создаем градиент для цвета
+                const gradientId = this.createGradient(color);
+
                 const hex = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 hex.setAttribute('points', points.join(' '));
-                hex.setAttribute('fill', color);
+                hex.setAttribute('fill', `url(#${gradientId})`);
                 hex.setAttribute('stroke', selected ? '#ffffff' : '#2d3748');
                 hex.setAttribute('stroke-width', selected ? '4' : '2');
                 hex.setAttribute('opacity', '0.9');
@@ -436,9 +511,17 @@
             }
 
             render(animate = false) {
+                // Сохраняем defs с градиентами перед очисткой
+                const defs = this.canvas.querySelector('defs');
+                
                 // Очищаем canvas
                 while (this.canvas.firstChild) {
                     this.canvas.removeChild(this.canvas.firstChild);
+                }
+                
+                // Восстанавливаем defs если они были
+                if (defs) {
+                    this.canvas.appendChild(defs);
                 }
 
                 // Рисуем все гексы
